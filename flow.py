@@ -21,6 +21,8 @@ import argparse
 import random
 import textwrap
 import sys
+import urllib2
+import subprocess
 
 
 #==========================================================================
@@ -541,9 +543,10 @@ def parseConsoleCommands():
 	parser.add_argument("-o", "--outputFormat", help="File format of the output. Use 'gv' for pure DOT code. Defaults to 'pdf'. More information at https://graphviz.gitlab.io/_pages/doc/info/output.html")
 	parser.add_argument("-e", "--fileExtension", help="File type to generate call graphs for. Ignores all other file types. Used for specifing programming language of source code. Defaults to '.cpp'. *Currently only supporting C++")
 	parser.add_argument("-f", "--filter", type=str, choices=["dot", "neato", "twopi", "circo", "fdp", "sfdp", "patchwork", "osage"], help="Filter used to generate the graph layout. Defaults to 'dot'. More information at https://graphviz.gitlab.io/_pages/pdf/dot.1.pdf")
-	parser.add_argument("-c", "--cluster", help="Set to 'True' if you want function definitions to be in discrete boxes based on file of declaration. Only valid for the 'dot' filter")
-	parser.add_argument("-l", "--linenumbers", help="Set to 'True' to add line numbers to graph")
-	parser.add_argument("--verbose", help="Set to 'true' tp print debug statements into terminal")
+	parser.add_argument("-c", "--cluster", action="store_true", help="Include if you want function definitions to be in discrete boxes based on file of declaration. Only valid for the 'dot' filter")
+	parser.add_argument("-l", "--linenumbers", action="store_true", help="Include to add line numbers to graph")
+	parser.add_argument("--verbose", action="store_true", help="Include to print debug statements into terminal")
+	parser.add_argument("--update", action="store_true", help="Include to update FunctionFlow to the latest version. Requires internet connection (duh)")
 	
 	args = parser.parse_args()
 	
@@ -564,6 +567,11 @@ def parseConsoleCommands():
 	if (args.linenumbers):
 		lineNumbers = True
 
+	#Updates program if requested
+	if (args.update):
+		updateProgram()
+		return
+
 	#Translate source code into a .gv file
 	translateDirectory(args.InputDirectory, fileExtension, "temp.gv", args.cluster)
 
@@ -574,9 +582,83 @@ def parseConsoleCommands():
 	renderGraph("temp.gv", args.outputFile, outputFormat=outFormat, gFilter=gFilter, deleteInput=False)
 
 
-parseConsoleCommands()
 
 
+#==========================================================================
+#		Install prerequisites and autoUpdate
+#==========================================================================
+
+def updateProgram():
+	'''
+	Updates Functions Flow from github, checks to ensure functionality, then 
+	deletes old version
+	'''
+	url = "https://raw.githubusercontent.com/Dynamitelaw/functionFlow/master/flow.py"
+
+	file = open("download.py", 'wb')
+	
+	try:
+		u = urllib2.urlopen(url)
+		meta = u.info()
+		file_size = int(meta.getheaders("Content-Length")[0])
+		print ("Downloading update   Bytes: %s..." % (file_size))
+
+		file_size_dl = 0
+		block_sz = 8192
+		while True:
+		    buffer = u.read(block_sz)
+		    if not buffer:
+		        break
+
+		    file_size_dl += len(buffer)
+		    file.write(buffer)
+
+		file.close()
+		print ("Download complete\nTesting functionality...")
+	
+	except Exception as e:
+		print ("Unable to download update")
+		print (e)
+		file.close()
+		return
+
+	isGoodFileDownload = testFunctionality()
+	
+	if (isGoodFileDownload):
+		os.remove("flow.py")
+		os.rename("download.py", "flow.py")
+		print ("Successfully updated FunctionFlow")
+	else:
+		print ("Error with downloaded file")
+		os.remove("download.py")
+
+
+def testFunctionality():
+	'''
+	This function is called to ensure the file downloaded correctly
+	'''
+	try:
+		print ("pre-marco")
+		import download
+		print("marco")
+		ping = download.ping()
+		print("polo")
+		if (ping == "I'm alive!!!"):
+			return True
+		else:
+			return False
+	except Exception as e:
+		return False
+
+
+def ping():
+	return "I'm alive!!!"
+
+#==========================================================================
+#		Main entry point
+#==========================================================================
+if __name__ == "__main__":
+   parseConsoleCommands()
 
 
 ############################################################################
@@ -590,5 +672,4 @@ parseConsoleCommands()
 -add support for multi-directory projects
 -add autoUpdate feature via github
 -add autoinstall prerequisites 
--Leeroy Jenkins
 '''
