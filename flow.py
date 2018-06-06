@@ -595,7 +595,7 @@ def updateProgram():
 	'''
 	url = "https://raw.githubusercontent.com/Dynamitelaw/functionFlow/master/flow.py"
 
-	file = open("download.py", 'wb')
+	file = open("download.py", 'w')
 	
 	try:
 		u = urllib2.urlopen(url)
