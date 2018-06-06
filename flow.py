@@ -3,7 +3,7 @@
 flow.py
 by Jose Rubianes
 
-FunctionFlow v1.0
+FunctionFlow v1.01
 	Contains the code to generate a call graph
 	for all the functions in a project directory.
 
@@ -638,11 +638,8 @@ def testFunctionality():
 	This function is called to ensure the file downloaded correctly
 	'''
 	try:
-		print ("pre-marco")
 		import download
-		print("marco")
 		ping = download.ping()
-		print("polo")
 		if (ping == "I'm alive!!!"):
 			return True
 		else:
@@ -654,11 +651,17 @@ def testFunctionality():
 def ping():
 	return "I'm alive!!!"
 
+
+
+
 #==========================================================================
 #		Main entry point
 #==========================================================================
+
 if __name__ == "__main__":
    parseConsoleCommands()
+
+
 
 
 ############################################################################
@@ -670,6 +673,5 @@ if __name__ == "__main__":
 -add option to cluster class methods
 -add option to disregard function calls not defined in source directory
 -add support for multi-directory projects
--add autoUpdate feature via github
 -add autoinstall prerequisites 
 '''
