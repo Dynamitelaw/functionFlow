@@ -590,5 +590,5 @@ parseConsoleCommands()
 -add support for multi-directory projects
 -add autoUpdate feature via github
 -add autoinstall prerequisites 
--Leeroy
+-Leeroy Jenkins
 '''
