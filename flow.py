@@ -614,6 +614,7 @@ def updateProgram():
 		    file.write(buffer)
 
 		file.close()
+		u.close()
 		print ("Download complete\nTesting functionality...")
 	
 	except Exception as e:
