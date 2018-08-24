@@ -3,7 +3,7 @@
 flow.py
 by Jose Rubianes
 
-FunctionFlow v1.01
+FunctionFlow v1.02
 	Contains the code to generate a call graph
 	for all the functions in a project directory.
 
@@ -21,8 +21,7 @@ import argparse
 import random
 import textwrap
 import sys
-import urllib2
-import subprocess
+import math
 
 
 #==========================================================================
@@ -58,17 +57,21 @@ def graphDirectory(directory, fileExtension):
 	return subgraphs
 
 
-def translateSubgraph(subgraph, subgraphNumber, cluster, fillColor):
+def translateSubgraph(subgraph, subgraphNumber, cluster, fillColor, functionDefinitionTome):
 	'''
 	Translates a given subgraph into the DOT (GraphViz) language.
 	Outputs resulting functional blocks as a list of strings
 	'''
 
+	if (verbose):
+		print (" Translating subgraph " + subgraph.name)
+
 	subLinelist = []	#meant for the first section of .gv file
 	tailLinelist = []	#meant for the last seciotn of .gv file
 
 	if (cluster):
-		subgraphHeader = "subgraph cluster_" + str(subgraphNumber) + " {"
+		#Groups functions defined in files within explicit groups
+		subgraphHeader = "subgraph cluster_" + subgraph.name + " {"
 	else:
 		subgraphHeader = "subgraph nonCluster_" + str(subgraphNumber) + " {"
 
@@ -81,27 +84,137 @@ def translateSubgraph(subgraph, subgraphNumber, cluster, fillColor):
 		subLinelist.append(style)
 		clusterFillColor = 'fillcolor="#f0f0f0";'
 		subLinelist.append(clusterFillColor)
+		clusterRank = 'clusterrank="local"'
+		subLinelist.append(clusterRank)
+
+		#Compress rendering of cluster into smaller dimensions
+		subgraph.segregate()
+		nodesNOTtoCompress = subgraph.nodesNOTtoCompress
+		nodesToCompressIntoBlock = subgraph.nodesToCompress
+
+		numberOfNodesToCompress = len(nodesToCompressIntoBlock)
+		cluserHeight = int (math.sqrt(numberOfNodesToCompress))
+		if (cluserHeight == 0):
+			cluserHeight = 1
+		clusterWidth = int (float(numberOfNodesToCompress) / cluserHeight) + 1
+
+		addEdgeBetweenCluster = True
+		
+		for row in range(0,cluserHeight,1):
+			#Constructs new graphviz subgraph for each compressed row
+			subLinelist.append("subgraph newRow" + str(row) + "_" + subgraph.name + " {")
+			subLinelist.append('rank="same";')
+			subLinelist.append(subgraph.name + "_row" + str(row) + ' [fontsize=1.0,style="invis"];')
+
+			for i in range(row*(clusterWidth+1),(row+1)*(clusterWidth+1),1):
+				if (i<len(nodesToCompressIntoBlock)):
+					node = nodesToCompressIntoBlock[i]
+
+					if (lineNumbers):
+						subLinelist.append((node.name + "_L" + str(node.line) + ' [style="filled",fillcolor=' + fillColor + '];'))
+					else:
+						subLinelist.append((node.name + ' [style="filled",fillcolor=' + fillColor + '];'))
+
+					for functionCall in node.calledFunctions:
+						if (len(functionCall) > 0):
+							foundInTome = False
+							for subgraphTomeEntry in functionDefinitionTome:
+								headName = subgraphTomeEntry[0]
+								if (headName == subgraph.name):
+									pass
+								else:
+									if (functionCall in subgraphTomeEntry[1]):
+										#Called function is defined inside another cluster (file)
+										foundInTome = True
+										break
+
+							if (foundInTome):  #Edges between clusters are failing in some cases. Disabled until I can figure out why
+								if (addEdgeBetweenCluster):
+									#Calls between clusters to be grouped into a single edge
+									if (lineNumbers):
+										edge = functionCall + " -> " + node.name + "_L" + str(node.line) + " [lhead=cluster_" + headName + ",ltail=cluster_" + subgraph.name + "];"
+									else:
+										edge = functionCall + " -> " + node.name + " [ltail=cluster_" + headName + ",lhead=cluster_" + subgraph.name + "];"
+									addEdgeBetweenCluster = False
+
+									tailLinelist.append(edge)
+							else:
+								if (lineNumbers):
+									edge = functionCall + " -> " + node.name + "_L" + str(node.line) + ";"
+								else:
+									edge = functionCall + " -> " + node.name + ";"
+							
+								tailLinelist.append(edge)
+
+				else:
+					break
+
+			subLinelist.append("}")
 
 
-	for node in subgraph.includedNodes:
-		if (lineNumbers):
-			subLinelist.append((node.name + "_L" + str(node.line) + ' [style="filled",fillcolor=' + fillColor + '];'))
-		else:
-			subLinelist.append((node.name + ' [style="filled",fillcolor=' + fillColor + '];'))
-
-		for functionCall in node.calledFunctions:
+		for node in nodesNOTtoCompress:
 			if (lineNumbers):
-				edge = functionCall + " -> " + node.name + "_L" + str(node.line) + ";"
+				subLinelist.append((node.name + "_L" + str(node.line) + ' [style="filled",fillcolor=' + fillColor + '];'))
 			else:
-				edge = functionCall + " -> " + node.name + ";"
-			tailLinelist.append(edge)
+				subLinelist.append((node.name + ' [style="filled",fillcolor=' + fillColor + '];'))
+
+			for functionCall in node.calledFunctions:
+				if (len(functionCall) > 0):
+					foundInTome = False
+					for subgraphTomeEntry in functionDefinitionTome:
+						headName = subgraphTomeEntry[0]
+						if (headName == subgraph.name):
+							pass
+						else:
+							if (functionCall in subgraphTomeEntry[1]):
+								#Called function is defined inside another cluster (file)
+								foundInTome = True
+								break
+
+					if (foundInTome):  
+						if (addEdgeBetweenCluster):
+							#Calls between clusters to be grouped into a single edge
+							if (lineNumbers):
+								edge = functionCall + " -> " + node.name + "_L" + str(node.line) + " [lhead=cluster_" + headName + ",ltail=cluster_" + subgraph.name + "];"
+							else:
+								edge = functionCall + " -> " + node.name + " [ltail=cluster_" + headName + ",lhead=cluster_" + subgraph.name + "];"
+							addEdgeBetweenCluster = False
+
+							tailLinelist.append(edge)
+					else:
+						if (lineNumbers):
+							edge = functionCall + " -> " + node.name + "_L" + str(node.line) + ";"
+						else:
+							edge = functionCall + " -> " + node.name + ";"
+					
+						tailLinelist.append(edge)
+
+
+		for row in range(0,cluserHeight-1,1):
+			edge = subgraph.name + "_row" + str(row) + " -> " + subgraph.name+"_row"+str(row+1) + ' [style="invis"];'
+			subLinelist.append(edge)
+
+	else:
+		for node in subgraph.includedNodes:
+			if (lineNumbers):
+				subLinelist.append((node.name + "_L" + str(node.line) + ' [style="filled",fillcolor=' + fillColor + '];'))
+			else:
+				subLinelist.append((node.name + ' [style="filled",fillcolor=' + fillColor + '];'))
+
+			for functionCall in node.calledFunctions:
+				if (len(functionCall) > 0):
+					if (lineNumbers):
+						edge = functionCall + " -> " + node.name + "_L" + str(node.line) + ";"
+					else:
+						edge = functionCall + " -> " + node.name + ";"
+					tailLinelist.append(edge)
 
 	subLinelist.append('}')
 
 	return subLinelist, tailLinelist
 
 
-def translateDirectory(directory, fileExtension, outputFileName, cluster):
+def translateDirectory(directory, fileExtension, outputFileName, cluster, excludeExternalFunctions):
 	'''
 	Translates an entire directory into a graph in the DOT (GraphViz) language
 	Outputs to specified file
@@ -116,25 +229,51 @@ def translateDirectory(directory, fileExtension, outputFileName, cluster):
 	outputLinelist = []		#First section of .gv file
 	endLinelist = []		#last section of .gv file
 	colorKeyList = []		#color key functional block of .gv file
+	nodesDefinedInDirectory = []
 
 	outputLinelist.append('digraph {')
 	outputLinelist.append('overlap=false;')
 	outputLinelist.append('concentrate=true;')
+	outputLinelist.append('compound=true;')
+	outputLinelist.append('rankdir="BT";')
 
 	colorKeyList.append('subgraph cluster_key{')
 	colorKeyList.append('label="Key";')
 
 	subgraphs = graphDirectory(directory, fileExtension)
 
+	functionDefinitionTome = []
+	for subgraph in subgraphs:
+		functionDefinitionTome.append([subgraph.name, subgraph.functionNamesDefinedInSubgraph])
+
 	for i in range(0, len(subgraphs), 1):
+		nodesDefinedInDirectory += subgraphs[i].includedNodes
+
 		#Each file has its own color of nodes to substitute clustering
 		fillColor = randomColorGenerator()
 		colorKeyEntry = subgraphs[i].name + '_' + fileExtension[1:] + ' [style="filled", shape=rectangle, fillcolor=' + fillColor + '];'
 		colorKeyList.append(colorKeyEntry)
 
-		subLinelist, tailLinelist = translateSubgraph(subgraphs[i], i, cluster, fillColor)
+		subLinelist, tailLinelist = translateSubgraph(subgraphs[i], i, cluster, fillColor, functionDefinitionTome)
 		outputLinelist += subLinelist
 		endLinelist += tailLinelist
+
+	if (excludeExternalFunctions):
+		#Deletes edges if called functions are not defined within directory
+		if (verbose):
+			print ("Deleting external function calls")
+
+		functionsDefinedInDirectory = []
+
+		for node in nodesDefinedInDirectory:
+			functionsDefinedInDirectory.append(node.name)
+
+		for i in range(len(endLinelist)-1,-1, -1):
+			calledFunction = endLinelist[i].replace(" ","").split("->")[0]
+			if (calledFunction in functionsDefinedInDirectory):
+				pass
+			else:
+				del endLinelist[i]
 
 	colorKeyList.append("}")
 	outputLinelist += colorKeyList
@@ -185,6 +324,21 @@ def randomColorGenerator():
 	return colorCode
 
 
+def sanitizeName(nameIn):
+	'''
+	Replace characters in function names for DOT error avoidance
+	'''
+	nameOut = nameIn.replace('::', '_')
+	nameOut = nameOut.replace('~', "")
+	nameOut = nameOut.replace('%', '_')
+	nameOut = nameOut.replace('.', '_')
+	nameOut = nameOut.replace('?', '_')
+	nameOut = nameOut.replace('|', '_')
+	nameOut = nameOut.replace('!', '_')
+	nameOut = nameOut.replace(';', '')
+	nameOut = nameOut.replace(':', '')
+
+	return nameOut
 
 
 #==========================================================================
@@ -196,12 +350,45 @@ class subGraph:
 		self.name = subGraphName
 		self.includedNodes = includedNodes
 
+		self.functionNamesDefinedInSubgraph = []
+		for node in self.includedNodes:
+			self.functionNamesDefinedInSubgraph.append(node.name)
+
+	def segregate(self):
+		'''
+		Splits includedNodes into a compressible cluster and a non-compressible cluster
+		'''
+		functionsCalledInSubgraph = []
+		for node in self.includedNodes:
+			functionsCalledInSubgraph += node.calledFunctions
+
+		functionsCalledInSubgraph = list( set(functionsCalledInSubgraph) )
+
+		self.nodesToCompress = []
+		self.nodesNOTtoCompress = []
+
+		for node in self.includedNodes:
+			compressible = True
+			if (node.name in functionsCalledInSubgraph):
+				#This node is called by another function in this subgraph
+				compressible = False
+			elif (len( list( set(node.calledFunctions) & set(self.functionNamesDefinedInSubgraph) ) ) > 0):
+				#This node calls other functions defined within this subgraph
+				compressible = False
+
+			if (compressible):
+				self.nodesToCompress.append(node)
+			else:
+				self.nodesNOTtoCompress.append(node)
+
+
 
 class Node:
-	def __init__(self, functionName, parentName, definitionLineNumber):
+	def __init__(self, functionName, parentName, definitionLineNumber, className):
 		self.name = functionName
 		self.parentName = parentName
 		self.line = definitionLineNumber
+		self.className = className
 		self.arguments = []
 		self.calledFunctions = []
 
@@ -210,6 +397,9 @@ class Node:
 
 	def addArgument(self, argument):
 		self.arguments.append(argument)
+
+	def __str__(self):
+		return self.name
 
 	def toString(self):
 		return (self.name + " (" + self.parentName + ")")
@@ -266,7 +456,7 @@ def fileToList(inputFileName):
 		currentLine = currentLine.replace("//", "// ")
 		index = currentLine.find("//")
 		if (index != -1):
-			if (currentLine.find("/*") < index):
+			if (not (currentLine.find("/*") < index)):
 				currentLine = currentLine[0:index]
 
 		#Replace certain characters for easier parsing
@@ -274,6 +464,8 @@ def fileToList(inputFileName):
 		currentLine = currentLine.replace(")", " ) ")
 		currentLine = currentLine.replace("{", " { ")
 		currentLine = currentLine.replace("}", " } ")
+		currentLine = currentLine.replace("[", " [ ")
+		currentLine = currentLine.replace("]", " ] ")
 		currentLine = currentLine.replace(",", " , ")
 		currentLine = currentLine.replace("\\", " @IGNOREQUOTE@ ")
 		currentLine = currentLine.replace("\t", "")
@@ -282,19 +474,12 @@ def fileToList(inputFileName):
 		currentLine = currentLine.replace('/*', ' @BEGINLONGCOMMENT@ ')	#makes long comments easier to find
 		currentLine = currentLine.replace('*/', ' @ENDLONGCOMMENT@ ')	#makes long comments easier to find
 		currentLine = currentLine.replace('*', ' * ')
-		currentLine = currentLine.replace('/', ' / ')
+		#currentLine = currentLine.replace('/', ' / ')
 		currentLine = currentLine.replace('=', ' = ')
-
-		#Replace characters for DOT error avoidance
-		currentLine = currentLine.replace('::', '_')
-		currentLine = currentLine.replace('~', "")
-		currentLine = currentLine.replace('%', '_')
-		currentLine = currentLine.replace('.', '_')
-		currentLine = currentLine.replace('?', '_')
-		currentLine = currentLine.replace('|', '_')
-		currentLine = currentLine.replace('!', '_')
-		currentLine = currentLine.replace(';', '')
-
+		currentLine = currentLine.replace('-', ' - ')
+		currentLine = currentLine.replace('+', ' + ')
+		currentLine = currentLine.replace('>', ' > ')
+		currentLine = currentLine.replace('<', ' < ')
 
 		
 		currentLineList = currentLine.split(" ")
@@ -366,10 +551,16 @@ def parseFunctionDefinition(parentName, fileList, index, foundFunctions, definit
 		if (fileList[tempIndex] == '('):
 			if (parenthesisCount == 0):
 				#Extracts function name
-				functionName = fileList[(tempIndex - 1)]
+				functionNameList = fileList[(tempIndex-1)].split("::")
+				if (len(functionNameList)>1):
+					functionName = sanitizeName(functionNameList[1])
+					className = sanitizeName(functionNameList[0])
+				else:
+					functionName = sanitizeName(fileList[(tempIndex - 1)])
+					className = False
 				
-				if ((functionName != "if") and (functionName != "for") and (functionName != "while")):
-					newFunction = Node(functionName, parentName, definitionLineNumber)
+				if (isNonStandardFunction(functionName)):
+					newFunction = Node(functionName, parentName, definitionLineNumber, className)
 
 					#Parses function input arguments
 					arguments = fileList[tempIndex+1:index]
@@ -415,9 +606,11 @@ def parseFunctionCalls (fileList, startingIndex):
 		tempIndex += 1
 		
 		if (fileList[tempIndex] == '@BEGINLONGCOMMENT@'):
-			inComment = True
+			if (not inString):
+				inComment = True
 		if (fileList[tempIndex] == '@ENDLONGCOMMENT@'):
-			inComment = False
+			if (not inString):
+				inComment = False
 
 		if (not inComment):
 			if ((fileList[tempIndex] == '@"@') and (fileList[tempIndex-1] != "@IGNOREQUOTE@")):
@@ -439,7 +632,7 @@ def parseFunctionCalls (fileList, startingIndex):
 			#Checks for function calls
 			if (fileList[tempIndex] == '('):
 				if (isNonStandardFunction(fileList[tempIndex-1])):
-					calledFunctions.append(fileList[tempIndex-1])
+					calledFunctions.append( sanitizeName( fileList[tempIndex-1].split(".")[-1] ) )
 
 
 def isNonStandardFunction(name):
@@ -505,6 +698,8 @@ def isNonStandardFunction(name):
 	
 	if (name == 'LOG_PRINT'):
 		return False
+	if (name == 'switch'):
+		return False
 
 	return True
 
@@ -518,14 +713,14 @@ def isNonStandardFunction(name):
 def parseConsoleCommands():
 	'''
 	Takes in console commands from user and provides usage help screen
-	Initiates graph construction
+	Initiates graph construction and rendering
 	'''
 	global verbose
 	global lineNumbers
 
 	parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
 		epilog=textwrap.dedent('''\
-			FunctionFlow v1.01
+			FunctionFlow v1.02
 			by Jose Rubianes
 
 			FunctionFlow allows you to create function call graphs for an entire project
@@ -545,8 +740,8 @@ def parseConsoleCommands():
 	parser.add_argument("-f", "--filter", type=str, choices=["dot", "neato", "twopi", "circo", "fdp", "sfdp", "patchwork", "osage"], help="Filter used to generate the graph layout. Defaults to 'dot'. More information at https://graphviz.gitlab.io/_pages/pdf/dot.1.pdf")
 	parser.add_argument("-c", "--cluster", action="store_true", help="Include if you want function definitions to be in discrete boxes based on file of declaration. Only valid for the 'dot' filter")
 	parser.add_argument("-l", "--linenumbers", action="store_true", help="Include to add line numbers to graph")
+	parser.add_argument("--exclusive", action="store_true", help="Include to only graph function calls when the called function is defined within the project directory")
 	parser.add_argument("--verbose", action="store_true", help="Include to print debug statements into terminal")
-	parser.add_argument("--update", action="store_true", help="Include to update FunctionFlow to the latest version. Requires internet connection (duh)")
 	
 	args = parser.parse_args()
 	
@@ -567,90 +762,15 @@ def parseConsoleCommands():
 	if (args.linenumbers):
 		lineNumbers = True
 
-	#Updates program if requested
-	if (args.update):
-		updateProgram()
-		return
 
 	#Translate source code into a .gv file
-	translateDirectory(args.InputDirectory, fileExtension, "temp.gv", args.cluster)
+	translateDirectory(args.InputDirectory, fileExtension, "temp.gv", args.cluster, args.exclusive)
 
 	if (verbose):
 		print("Translation completed")
 
 	#Render .gv file
 	renderGraph("temp.gv", args.outputFile, outputFormat=outFormat, gFilter=gFilter, deleteInput=False)
-
-
-
-
-#==========================================================================
-#		Install prerequisites and autoUpdate
-#==========================================================================
-
-def updateProgram():
-	'''
-	Updates Functions Flow from github, checks to ensure functionality, then 
-	deletes old version
-	'''
-	url = "https://raw.githubusercontent.com/Dynamitelaw/functionFlow/master/flow.py"
-
-	file = open("download.py", 'w')
-	
-	try:
-		u = urllib2.urlopen(url)
-		meta = u.info()
-		file_size = int(meta.getheaders("Content-Length")[0])
-		print ("Downloading update   Bytes: %s..." % (file_size))
-
-		file_size_dl = 0
-		block_sz = 8192
-		while True:
-		    buffer = u.read(block_sz)
-		    if not buffer:
-		        break
-
-		    file_size_dl += len(buffer)
-		    file.write(buffer)
-
-		file.close()
-		u.close()
-		print ("Download complete\nTesting functionality...")
-	
-	except Exception as e:
-		print ("Unable to download update")
-		print (e)
-		file.close()
-		return
-
-	isGoodFileDownload = testFunctionality()
-	
-	if (isGoodFileDownload):
-		os.remove("flow.py")
-		os.rename("download.py", "flow.py")
-		print ("Successfully updated FunctionFlow")
-	else:
-		print ("Error with downloaded file")
-		os.remove("download.py")
-
-
-def testFunctionality():
-	'''
-	This function is called to ensure the file downloaded correctly
-	'''
-	try:
-		import download
-		ping = download.ping()
-		if (ping == "I'm alive!!!"):
-			return True
-		else:
-			return False
-	except Exception as e:
-		return False
-
-
-def ping():
-	return "I'm alive!!!"
 
 
 
@@ -672,7 +792,6 @@ if __name__ == "__main__":
 -Parse class definitions and method calls
 -handle "::" definitions
 -add option to cluster class methods
--add option to disregard function calls not defined in source directory
 -add support for multi-directory projects
--add autoinstall prerequisites 
+-allow calls between clusters to be grouped into a single edge
 '''
